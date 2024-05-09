@@ -7,7 +7,7 @@ from dipy.core.gradients import gradient_table
 
 
 def free_water_elimination(dwi_fname, bval_fname, bvec_fname, 
-                           mask_fname, model_name, output_fname):
+                           mask_fname, fwe_model, output_fname):
 
   # load diffusion, mask image and bvec/bval gradient table
   dwi  = nib.load(dwi_fname)
@@ -15,7 +15,7 @@ def free_water_elimination(dwi_fname, bval_fname, bvec_fname,
   gtab = gradient_table(bval_fname, bvec_fname)
 
   # perform free water elimination
-  match model_name.lower():
+  match fwe_model.lower():
     case "dipy_fwdti":
       fwe_image = dipy_fwdti(dwi, gtab, mask)
     case _:
@@ -56,15 +56,15 @@ if __name__ == "__main__":
   parser.add_argument("bval_fname", type = str)
   parser.add_argument("bvec_fname", type = str)
   parser.add_argument("mask_fname", type = str)
-  parser.add_argument("model_name", type = str)
-  parser.add_argument("output_dir", type = str)
+  parser.add_argument("fwe_model", type = str)
+  parser.add_argument("output_fname", type = str)
   args = parser.parse_args()
   
   free_water_elimination(
-    dwi_fname  = args.dwi_fname,
-    bval_fname = args.bval_fname, 
-    bvec_fname = args.bvec_fname, 
-    mask_fname = args.mask_fname,
-    model_name = args.model_name, 
-    output_dir = args.output_dir
+    dwi_fname    = args.dwi_fname,
+    bval_fname   = args.bval_fname, 
+    bvec_fname   = args.bvec_fname, 
+    mask_fname   = args.mask_fname,
+    fwe_model    = args.fwe_model, 
+    output_fname = args.output_fname
   )
