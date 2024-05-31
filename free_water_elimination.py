@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 import nibabel as nib
-
+from beltrami import BeltramiModel
 import dipy.reconst.fwdti as fwdti
 from dipy.core.gradients import gradient_table
 
@@ -16,6 +16,8 @@ def free_water_elimination(dwi_fname, bval_fname, bvec_fname,
 
   # perform free water elimination
   match fwe_model.lower():
+    case "golub_beltrami":
+      fwe_image = golub_beltrami(dwi, gtab, mask)
     case "dipy_fwdti":
       fwe_image = dipy_fwdti(dwi, gtab, mask)
     case _:
@@ -24,6 +26,18 @@ def free_water_elimination(dwi_fname, bval_fname, bvec_fname,
   # save free water eliminated image
   nib.save(fwe_image, output_fname)
   print(f"Saved: {output_fname}")
+
+
+def golub_beltrami(dwi, gtab, mask = None, Diso = 3.0e-3):
+  # fit Beltrami regularized gradient descent free-water diffusion tensor model
+  model     = BeltramiModel(gtab, init_method = "hybrid", Diso = Diso)
+  model_fit = model.fit(dwi.get_fdata(), mask = mask)
+
+  # extract free-water dti model parameters 
+  fwf = model_fit.fw # free water fraction
+
+  # return free-water eliminated signal
+  return remove_free_water(dwi, gtab, fwf, Diso)
   
 
 def dipy_fwdti(dwi, gtab, mask = None, Diso = 3.0e-3):
@@ -32,21 +46,25 @@ def dipy_fwdti(dwi, gtab, mask = None, Diso = 3.0e-3):
   model_fit = model.fit(dwi.get_fdata(), mask = mask)  
 
   # extract free-water dti model parameters
-  model_params = model_fit.model_params # all model parameters
-  fwf = model_params[..., -1] # extract free-water fraction
+  fwf = model_fit.model_params[..., -1]
 
+  # return free-water eliminated signal
+  return remove_free_water(dwi, gtab, fwf, Diso)
+
+
+def remove_free_water(dwi, gtab, fwf, Diso):
   # extract b0 signal from dwi image
-  S0 = dwi.get_fdata()[..., gtab.bvals == 0].mean(axis = -1)
+  S0 = dwi.get_fdata()[..., gtab.bvals == 0].mean(axis = -1)  
 
   # compute free-water signal
-  fw_decay  = np.exp(-gtab.bvals * Diso) # free-water exponential decay
+  fw_decay = np.exp(-gtab.bvals * Diso) # free-water exponential decay
   fw_signal = (S0 * fwf).reshape(-1, 1) * fw_decay
   fw_signal = fw_signal.reshape(fwf.shape + (dwi.shape[-1], ))
 
   # compute free-water eliminated signal
   fwe_signal = dwi.get_fdata() - fw_signal
 
-  # return free-water eliminated signal 
+  # return free-water eliminated signal
   return nib.Nifti1Image(fwe_signal, affine = dwi.affine)
 
 
