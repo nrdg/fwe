@@ -28,13 +28,25 @@ def free_water_elimination(dwi_fname, bval_fname, bvec_fname,
   print(f"Saved: {output_fname}")
 
 
-def golub_beltrami(dwi, gtab, mask = None, Diso = 3.0e-3):
+def golub_beltrami(dwi, gtab, mask = None, init_method = "hybrid", 
+                   Diso = 3.0e-3, Stissue = None, Swater = None,
+                   n_iterations = 100, learning_rate = 0.0005):
+   
+  # adjust b-values for Beltrami model
+  gtab.bvals = gtab.bvals * 1e-3
+
   # fit Beltrami regularized gradient descent free-water diffusion tensor model
-  model     = BeltramiModel(gtab, init_method = "hybrid", Diso = Diso)
+  model = BeltramiModel(gtab, init_method = init_method, Diso = Diso * 1e3, 
+                        Stissue = Stissue, Swater = Swater, 
+                        iterations = n_iterations, 
+                        learning_rate = learning_rate)
   model_fit = model.fit(dwi.get_fdata(), mask = mask)
 
   # extract free-water dti model parameters 
   fwf = model_fit.fw # free water fraction
+
+  # undo b-value adjustment from Beltrami model
+  gtab.bvals = gtab.bvals * 1e3
 
   # return free-water eliminated signal
   return remove_free_water(dwi, gtab, fwf, Diso)
