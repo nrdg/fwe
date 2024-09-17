@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fwe"
+version = "0.0.1"
+authors = [
+  { name = "Kelly Chang", email = "kchang4@uw.edu" }
+] 
+description = "Free water elimination in diffusion MRI"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/kellychang4/fwe"
+Issues = "https://github.com/kellychang4/fwe/issues"
