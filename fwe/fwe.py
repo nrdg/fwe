@@ -1,13 +1,25 @@
+import re
+import logging
 import argparse
 import numpy as np
 import nibabel as nib
-from beltrami import BeltramiModel
+from .beltrami import BeltramiModel
 import dipy.reconst.fwdti as fwdti
 from dipy.core.gradients import gradient_table
 
+# set up logging configuration
+logging.basicConfig(level  = logging.INFO)
+logger = logging.getLogger("FWE")
 
-def free_water_elimination(dwi_fname, bval_fname, bvec_fname, 
-                           mask_fname, fwe_model, output_fname):
+
+def free_water_elimination(
+    dwi_fname, bval_fname, bvec_fname, mask_fname, fwe_model, output_fname,
+    Diso = 3.0e-3, save_params = False, 
+    golub_kwargs = {
+      "init_method": "hybrid", "Stissue": None, "Swater": None, 
+      "n_iterations": 100, "learning_rate": 0.0005
+    }
+  ):
 
   # load diffusion, mask image and bvec/bval gradient table
   dwi  = nib.load(dwi_fname)
@@ -16,20 +28,29 @@ def free_water_elimination(dwi_fname, bval_fname, bvec_fname,
 
   # perform free water elimination
   match fwe_model.lower():
-    case "golub_beltrami":
-      fwe_image = golub_beltrami(dwi, gtab, mask)
     case "dipy_fwdti":
-      fwe_image = dipy_fwdti(dwi, gtab, mask)
+      logger.info("Performing free water elimination using DIPY's FWDTI model")
+      fwe_image, model_params = dipy_fwdti(dwi, gtab, mask, Diso, save_params)
+    case "golub_beltrami":
+      logger.info("Performing free water elimination using Golub's Beltrami model")
+      fwe_image, model_params = golub_beltrami(
+        dwi, gtab, mask, Diso, save_params, **golub_kwargs)
     case _:
-      print("Unrecognized free water elimination model")
+      logger.error("Unrecognized free water elimination model")
+
+  # save free water model parameters
+  if save_params: 
+    output_params = re.sub("_(\\w+).nii.gz$", "_params.nii.gz", output_fname)
+    nib.save(model_params, output_params)
+    logger.info(f"Saving free water model parameters to: {output_fname}")
 
   # save free water eliminated image
   nib.save(fwe_image, output_fname)
-  print(f"Saved: {output_fname}")
+  logger.info(f"Saving free water eliminated image to: {output_fname}")
 
 
-def golub_beltrami(dwi, gtab, mask = None, init_method = "hybrid", 
-                   Diso = 3.0e-3, Stissue = None, Swater = None,
+def golub_beltrami(dwi, gtab, mask = None, Diso = 3.0e-3, save_params = False,
+                   init_method = "hybrid", Stissue = None, Swater = None,
                    n_iterations = 100, learning_rate = 0.0005):
    
   # adjust b-values for Beltrami model
@@ -42,26 +63,35 @@ def golub_beltrami(dwi, gtab, mask = None, init_method = "hybrid",
                         learning_rate = learning_rate)
   model_fit = model.fit(dwi.get_fdata(), mask = mask)
 
+  # save free water dti model parameters
+  model_params = nib.Nifti1Image(model_fit.model_params, affine = dwi.affine) \
+    if save_params else None
+
   # extract free-water dti model parameters 
   fwf = model_fit.fw # free water fraction
 
   # undo b-value adjustment from Beltrami model
   gtab.bvals = gtab.bvals * 1e3
 
-  # return free-water eliminated signal
-  return remove_free_water(dwi, gtab, fwf, Diso)
+  # return free-water eliminated signal (and model parameters)
+  return (remove_free_water(dwi, gtab, fwf, Diso), model_params)
   
 
-def dipy_fwdti(dwi, gtab, mask = None, Diso = 3.0e-3):
+def dipy_fwdti(dwi, gtab, mask = None, Diso = 3.0e-3, 
+               save_params = False):
   # fit free-water diffusion tensor imaging model
   model = fwdti.FreeWaterTensorModel(gtab)
   model_fit = model.fit(dwi.get_fdata(), mask = mask)  
 
+  # save free water dti model parameters
+  model_params = nib.Nifti1Image(model_fit.model_params, affine = dwi.affine) \
+    if save_params else None
+
   # extract free-water dti model parameters
   fwf = model_fit.model_params[..., -1]
 
-  # return free-water eliminated signal
-  return remove_free_water(dwi, gtab, fwf, Diso)
+  # return free-water eliminated signal (and model parameters)
+  return (remove_free_water(dwi, gtab, fwf, Diso), model_params) 
 
 
 def remove_free_water(dwi, gtab, fwf, Diso):
@@ -88,6 +118,8 @@ if __name__ == "__main__":
   parser.add_argument("mask_fname", type = str)
   parser.add_argument("fwe_model", type = str)
   parser.add_argument("output_fname", type = str)
+  parser.add_argument("--Diso", type = float, default = 3.0e-3)
+  parser.add_argument("--save_params", type = bool, default = False)
   args = parser.parse_args()
   
   free_water_elimination(
@@ -96,5 +128,7 @@ if __name__ == "__main__":
     bvec_fname   = args.bvec_fname, 
     mask_fname   = args.mask_fname,
     fwe_model    = args.fwe_model, 
-    output_fname = args.output_fname
+    output_fname = args.output_fname, 
+    Diso         = args.Diso,
+    save_params  = args.save_params
   )
