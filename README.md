@@ -40,14 +40,25 @@ If the data has multiple non-zero b-values, it is preferable to use the
 
 ## Example
 
+The following is a complete example, using a subject from the [HBN POD2 dataset](https://www.nature.com/articles/s41597-022-01695-7).
+
+To run this example, you will also need the `boto3` software library (`pip install boto3`), which will download the data.
+
 ```python
+from dipy.data.fetcher import fetch_hbn, dipy_home
+import os.path as op
 from fwe import free_water_elimination
 
+fetch_hbn(["NDARAA948VFH"])
+
+dwi_folder = op.join(dipy_home, "HBN/derivatives/qsiprep/sub-NDARAA948VFH/ses-HBNsiteRU/dwi/")
+data_root = op.join(dwi_folder, "sub-NDARAA948VFH_ses-HBNsiteRU_acq-64dir_space-T1w_desc-preproc_dwi")
+
 free_water_elimination(
-  dwi_fname    = "sub-01_dwi.nii.gz",
-  bval_fname   = "sub-01.bval",
-  bvec_fname   = "sub-01.bvec",
-  mask_fname   = "sub-01_mask.nii.gz",
+  dwi_fname    = data_root + ".nii.gz",
+  bval_fname   = data_root + ".bval",
+  bvec_fname   = data_root + ".bvec",
+  mask_fname   = op.join(dwi_folder, "sub-NDARAA948VFH_ses-HBNsiteRU_acq-64dir_space-T1w_desc-brain_mask.nii.gz"),
   fwe_model    = "dipy_fwdti",
   output_fname = "sub-01_fwe.nii.gz"
 )
