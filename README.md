@@ -4,6 +4,7 @@
 
 Implements free water elimination (FWE) models for preprocessing diffusion MRI data.
 
+This code was used in the paper: ["Free water elimination tractometry for aging brains"](https://direct.mit.edu/imag/article/doi/10.1162/IMAG.a.991/133658/Free-water-elimination-tractometry-for-aging)
 ```
 @article{10.1162/IMAG.a.991,
     author = {Chang, Kelly and Burke, Luke and LaPiana, Nina and Howlett, Bradley and Hunt, David and Dezelar, Margaret and Andre, Jalal B. and Curl, Patti and Ralston, James D. and Rokem, Ariel and Mac Donald, Christine L.},
@@ -17,7 +18,6 @@ Implements free water elimination (FWE) models for preprocessing diffusion MRI d
 }
 
 ```
-
 
 ---
 
@@ -37,7 +37,7 @@ automatically as part of the installation process specified above.
 
 ## Available Models
 
-* Free water DTI as implmented in `dipy` ([Hoy et al., 2014](https://doi.org/10.1016/j.neuroimage.2014.09.053)): Use `fwe_model="dipy_fwdti"`
+* Free water DTI as implemented in `dipy` ([Hoy et al., 2014](https://doi.org/10.1016/j.neuroimage.2014.09.053)): Use `fwe_model="dipy_fwdti"`
 * Beltrami regularized gradient descent free water DTI ([Golub et al., 2020](https://doi.org/10.1002/mrm.28599)): Use `fwe_model="golub_beltrami"`
 
 ---

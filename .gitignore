@@ -1,2 +1,4 @@
 dist/**
 fwe.egg-info
+.DS_store
+__pycache__
