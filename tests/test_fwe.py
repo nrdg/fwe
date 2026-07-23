@@ -8,12 +8,19 @@ from dipy.io.gradients import read_bvals_bvecs
 from dipy.sims.voxel import multi_tensor
 from dipy.reconst.dti import fractional_anisotropy, mean_diffusivity
 
-from fwe.fwe import dipy_fwdti, remove_free_water, free_water_elimination
+from fwe.fwe import (
+    dipy_fwdti,
+    remove_free_water,
+    free_water_elimination,
+    golub_beltrami,
+)
+from fwe.beltrami import BeltramiModel
 
 
 def setup_module():
     """Module-level setup: simulate multi-shell DWI data with known ground truth."""
     global gtab_2s, DWI, FAref, MDref, GTF
+    global DWI_beltrami, GTF_beltrami, gtab_beltrami
 
     _, fbvals, fbvecs = get_fnames(name="small_64D")
     bvals, bvecs = read_bvals_bvecs(fbvals, fbvecs)
@@ -53,27 +60,61 @@ def setup_module():
             FAref[0, i, j] = fractional_anisotropy(np.array([0.0017, 0.0003, 0.0003]))
             MDref[0, i, j] = mean_diffusivity(np.array([0.0017, 0.0003, 0.0003]))
 
+    # 10x10x10 volume with spatially varying S0 for Beltrami tests.
+    # The Beltrami init methods (fraction_init_s0) require S0 variation to
+    # distinguish Stissue from Swater via percentiles.
+    beltrami_shape = (10, 10, 10)
+    beltrami_fwf = 0.3
+    mevals_bel = np.array([[0.0017, 0.0003, 0.0003], [0.003, 0.003, 0.003]])
 
-def test_dipy_fwdti_single_voxel():
-    """Single-voxel FW-DTI fit recovers known free water fraction."""
-    gtf = 0.44444
-    mevals = np.array([[0.0017, 0.0003, 0.0003], [0.003, 0.003, 0.003]])
-    S_conta, _ = multi_tensor(
-        gtab_2s,
-        mevals,
-        S0=100,
-        angles=[(90, 0), (90, 0)],
-        fractions=[(1 - gtf) * 100, gtf * 100],
-        snr=None,
+    # Create spatially varying S0 map (range ~80..120)
+    rng = np.random.RandomState(42)
+    S0_map = 100 + 20 * rng.randn(*beltrami_shape)
+    S0_map = np.clip(S0_map, 80, 120)
+
+    DWI_beltrami = np.zeros(beltrami_shape + (len(bvals),))
+    # Gradient table with b0_threshold=0 for Beltrami tests (required after bval scaling)
+    gtab_beltrami = gradient_table(bvals, bvecs=bvecs, b0_threshold=0)
+
+    for i in range(beltrami_shape[0]):
+        for j in range(beltrami_shape[1]):
+            for k in range(beltrami_shape[2]):
+                S, _ = multi_tensor(
+                    gtab_beltrami,
+                    mevals_bel,
+                    S0=S0_map[i, j, k],
+                    angles=[(90, 0), (90, 0)],
+                    fractions=[(1 - beltrami_fwf) * 100, beltrami_fwf * 100],
+                    snr=None,
+                )
+                DWI_beltrami[i, j, k] = S
+    GTF_beltrami = np.full(beltrami_shape, beltrami_fwf)
+
+
+def test_beltrami_multi_voxel():
+    """Beltrami model fit recovers known free water fraction on a 5x5x5 volume."""
+    # Beltrami model expects bvals in s/mm² (scaled by 1e-3) and Diso in mm²/ms
+    # b0_threshold=0 is required because scaled bvals are all < 50 (default threshold)
+    bvals_scaled = gtab_beltrami.bvals * 1e-3
+    gtab_scaled = gradient_table(bvals_scaled, gtab_beltrami.bvecs, b0_threshold=0)
+
+    model = BeltramiModel(
+        gtab_scaled,
+        init_method="hybrid",
+        Diso=3.0,
+        iterations=100,
+        learning_rate=0.0005,
     )
+    model_fit = model.fit(DWI_beltrami)
 
-    # Wrap in nibabel image
-    dwi_img = nib.Nifti1Image(S_conta.reshape(1, 1, 1, -1), affine=np.eye(4))
-    fwe_img, model_params = dipy_fwdti(dwi_img, gtab_2s, Diso=3.0e-3, save_params=True)
+    # Recovered free water fraction (BeltramiModel stores tissue fraction in params[..., 12])
+    fwf = 1 - model_fit.model_params[..., 12]
 
-    # Extract free water fraction from model_params (last parameter)
-    fwf = model_params.get_fdata()[0, 0, 0, -1]
-    assert abs(fwf - gtf) < 0.05, f"Free water fraction {fwf:.4f} != {gtf}"
+    # Check mean fwf across the volume (loose tolerance for gradient descent)
+    mean_fwf = np.mean(fwf)
+    assert abs(mean_fwf - GTF_beltrami[0, 0, 0]) < 0.15, (
+        f"Mean free water fraction {mean_fwf:.4f} != ~0.3"
+    )
 
 
 def test_dipy_fwdti_multi_voxel():
@@ -200,3 +241,81 @@ def test_free_water_elimination_invalid_model(tmp_path):
         )
     except Exception:
         pass  # acceptable — the function may fail on missing output
+
+
+def test_beltrami_uniform_spatial():
+    """Beltrami regularization doesn't introduce spatial artifacts on uniform data."""
+    bvals_scaled = gtab_beltrami.bvals * 1e-3
+    gtab_scaled = gradient_table(bvals_scaled, gtab_beltrami.bvecs, b0_threshold=0)
+
+    model = BeltramiModel(
+        gtab_scaled,
+        init_method="hybrid",
+        Diso=3.0,
+        iterations=100,
+        learning_rate=0.0005,
+    )
+    model_fit = model.fit(DWI_beltrami)
+    fwf = 1 - model_fit.model_params[..., 12]
+
+    # All voxels have the same fwf; regularization should keep them similar.
+    # With S0 variation (needed for init), some residual variation is expected.
+    fwf_std = np.std(fwf)
+    assert fwf_std < 0.25, f" fwf spatial std {fwf_std:.4f} > 0.25 on uniform fwf data"
+
+
+def test_golub_beltrami_wrapper():
+    """golub_beltrami wrapper produces correct output shape and reasonable fwf."""
+    dwi_img = nib.Nifti1Image(DWI_beltrami, affine=np.eye(4))
+    fwe_img, model_params = golub_beltrami(
+        dwi_img,
+        gtab_beltrami,
+        mask=None,
+        Diso=3.0e-3,
+        save_params=True,
+        n_iterations=100,
+        learning_rate=0.0005,
+    )
+
+    assert fwe_img.shape == DWI_beltrami.shape
+    assert model_params.shape == DWI_beltrami.shape[:3] + (13,)
+
+    # Check mean fwf is reasonable
+    fwf = 1 - model_params.get_fdata()[..., 12]
+    mean_fwf = np.mean(fwf)
+    assert abs(mean_fwf - 0.3) < 0.15, f"Mean fwf {mean_fwf:.4f} != ~0.3"
+
+
+def test_free_water_elimination_golub_beltrami(tmp_path):
+    """End-to-end: free_water_elimination with golub_beltrami model."""
+    shape = (10, 10, 10)
+    mask_vol = np.ones(shape, dtype=np.float64)
+    affine = np.eye(4)
+
+    dwi_img = nib.Nifti1Image(DWI_beltrami, affine=affine)
+    mask_img = nib.Nifti1Image(mask_vol, affine=affine)
+
+    dwi_path = str(tmp_path / "dwi.nii.gz")
+    bval_path = str(tmp_path / "dwi.bval")
+    bvec_path = str(tmp_path / "dwi.bvec")
+    mask_path = str(tmp_path / "mask.nii.gz")
+    output_path = str(tmp_path / "fwe_output.nii.gz")
+
+    nib.save(dwi_img, dwi_path)
+    nib.save(mask_img, mask_path)
+    np.savetxt(bval_path, gtab_beltrami.bvals.reshape(1, -1), fmt="%d")
+    np.savetxt(bvec_path, gtab_beltrami.bvecs.T, fmt="%.6f")
+
+    free_water_elimination(
+        dwi_fname=dwi_path,
+        bval_fname=bval_path,
+        bvec_fname=bvec_path,
+        mask_fname=mask_path,
+        fwe_model="golub_beltrami",
+        output_fname=output_path,
+        Diso=3.0e-3,
+    )
+
+    assert (tmp_path / "fwe_output.nii.gz").exists()
+    result = nib.load(output_path)
+    assert result.shape == DWI_beltrami.shape

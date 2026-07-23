@@ -549,7 +549,7 @@ def fraction_init_md(signal, gtab, Diso=3, tissue_MD=0.6):
     msignal = signal[..., np.logical_or(bvals == 0, bvals == mean_bval)]
 
     # Conventional DTI
-    dti_params = ols_fit_tensor(design_matrix(mgtab), msignal)
+    dti_params = ols_fit_tensor(design_matrix(mgtab), msignal)[0]
     eigvals = dti_params[..., 0:3]
     MD = np.mean(eigvals, axis=-1)  # mean diffusivity
 
@@ -620,7 +620,7 @@ def tensor_init(
     np.clip(Atissue, 0.0001, 0.9999, out=Atissue)
 
     # applying standard DTI to corrected signal
-    dti_params = ols_fit_tensor(design_matrix(this_gtab), Atissue)
+    dti_params = ols_fit_tensor(design_matrix(this_gtab), Atissue)[0]
 
     return dti_params
 
