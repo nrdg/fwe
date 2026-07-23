@@ -15,6 +15,8 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering",
 ]
 
 dependencies = [
@@ -25,3 +27,11 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/nrdg/fwe"
 Issues = "https://github.com/nrdg/fwe/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["fwe*"]
+exclude = ["tests*"]
+
+[tool.ruff]
+line-length = 88
